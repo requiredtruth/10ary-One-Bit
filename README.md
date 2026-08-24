@@ -7,7 +7,7 @@ This is a foundation for low-bit language-model research—not a pretrained mode
 ## Verify in one command
 
 ```console
-$ sh doit.sh
+$ sh install.sh
 ...
 Ran 7 tests
 OK
@@ -70,3 +70,12 @@ Public donation addresses and the confirmed-transaction request process are in [
 
 MIT. See [LICENSE](LICENSE).
 
+
+
+## Install and run
+
+```sh
+chmod +x install.sh run.sh
+./install.sh
+./run.sh --help
+```
