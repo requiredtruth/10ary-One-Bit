@@ -18,7 +18,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python -m compileall -q tenary tests
-      - run: ./install.sh test
+      - run: ./install.sh
       - run: ./cli.sh self-test
       - run: ./run.sh --demo --repeats 3
 
