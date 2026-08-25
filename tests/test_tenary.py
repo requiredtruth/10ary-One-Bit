@@ -58,7 +58,7 @@ class FormatTests(unittest.TestCase):
         self.assertGreater(result["median_ms"], 0)
 
     def test_gui_demo_needs_no_preexisting_artifact(self):
-        result = run_demo(repeats=3)
+        result = run_demo(repeats=5)
         self.assertEqual(result["status"], "PASS")
         self.assertTrue(result["artifact_created"])
         self.assertTrue(result["matvec_matches_oracle"])
