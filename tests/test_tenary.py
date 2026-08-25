@@ -8,6 +8,7 @@ from tenary.format import from_bytes, pack, read, to_bytes, unpack, write
 from tenary.runtime import matvec
 from tenary.sparsity import apply_nm
 from tenary.training import cosine_hardness, error_aware_surrogate, scheduled_binary, telemetry
+from tenary.gui import run_demo
 
 
 class FormatTests(unittest.TestCase):
@@ -55,6 +56,12 @@ class FormatTests(unittest.TestCase):
         result = benchmark(pack(self.weights), repeats=5)
         self.assertEqual(result["kernel"], "scalar-reference")
         self.assertGreater(result["median_ms"], 0)
+
+    def test_gui_demo_needs_no_preexisting_artifact(self):
+        result = run_demo(repeats=3)
+        self.assertEqual(result["status"], "PASS")
+        self.assertTrue(result["artifact_created"])
+        self.assertTrue(result["matvec_matches_oracle"])
 
 
 if __name__ == "__main__": unittest.main()
