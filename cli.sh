@@ -2,8 +2,8 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PY="$ROOT/.venv/bin/python"
-if [ ! -x "$PY" ] || ! "$PY" -c 'import numpy, PySide6' >/dev/null 2>&1; then
+if [ ! -x "$PY" ] || ! "$PY" -c 'import numpy' >/dev/null 2>&1; then
   "$ROOT/install.sh"
 fi
 cd "$ROOT"
-exec "$PY" -m tenary.gui "$@"
+exec "$PY" -m tenary "$@"
