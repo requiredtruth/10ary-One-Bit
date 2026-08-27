@@ -1,10 +1,12 @@
+import struct
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 import numpy as np
 
 from tenary.benchmark import benchmark
-from tenary.format import from_bytes, pack, read, to_bytes, unpack, write
+from tenary.format import HEADER, from_bytes, pack, read, to_bytes, unpack, write
 from tenary.runtime import matvec
 from tenary.sparsity import apply_nm
 from tenary.training import cosine_hardness, error_aware_surrogate, scheduled_binary, telemetry
@@ -29,6 +31,43 @@ class FormatTests(unittest.TestCase):
     def test_corruption_is_rejected(self):
         damaged = bytearray(to_bytes(pack(self.weights))); damaged[-1] ^= 1
         with self.assertRaisesRegex(ValueError, "payload checksum mismatch"): from_bytes(bytes(damaged))
+
+    @staticmethod
+    def _rechecksum(data):
+        struct.pack_into("<I", data, 24, zlib.crc32(data[HEADER.size :]))
+        struct.pack_into("<I", data, 28, zlib.crc32(data[:28]))
+        return bytes(data)
+
+    def test_checksum_valid_reserved_mask_bits_are_rejected(self):
+        packed = pack(self.weights)
+        data = bytearray(to_bytes(packed))
+        masks_start = HEADER.size + packed.group_count * 2
+        first_mask = struct.unpack_from("<H", data, masks_start)[0]
+        struct.pack_into("<H", data, masks_start, first_mask | (1 << 10))
+        with self.assertRaisesRegex(ValueError, "reserved bits"):
+            from_bytes(self._rechecksum(data))
+
+    def test_checksum_valid_row_padding_bits_are_rejected(self):
+        packed = pack(self.weights)
+        data = bytearray(to_bytes(packed))
+        masks_start = HEADER.size + packed.group_count * 2
+        final_group = packed.groups_per_row - 1
+        offset = masks_start + final_group * 2
+        final_mask = struct.unpack_from("<H", data, offset)[0]
+        struct.pack_into("<H", data, offset, final_mask | (1 << 8))
+        with self.assertRaisesRegex(ValueError, "row-padding"):
+            from_bytes(self._rechecksum(data))
+
+    def test_checksum_valid_nonfinite_scale_is_rejected(self):
+        data = bytearray(to_bytes(pack(self.weights)))
+        struct.pack_into("<H", data, HEADER.size, 0x7C00)
+        with self.assertRaisesRegex(ValueError, "finite positive"):
+            from_bytes(self._rechecksum(data))
+
+    def test_unrepresentable_group_scale_is_rejected(self):
+        weights = np.full((1, 10), np.finfo(np.float32).max, dtype=np.float32)
+        with self.assertRaisesRegex(ValueError, "float16 range"):
+            pack(weights)
 
     def test_atomic_file_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,4 +104,3 @@ class FormatTests(unittest.TestCase):
 
 
 if __name__ == "__main__": unittest.main()
-

@@ -51,7 +51,7 @@ Explicit installation or repair:
 - error-aware surrogate-gradient damping
 - code occupancy, flip-rate, error, and gradient telemetry
 - deterministic N:M magnitude sparsity masks
-- checksummed, versioned, little-endian T10B1 artifacts
+- checksummed, versioned, canonical little-endian T10B1 artifacts with strict scale and padding validation
 - packed scalar CPU matvec without materializing weights
 
 See [FORMAT.md](FORMAT.md) for equations, alignment, padding, precision, serialization, and rejection rules.
