@@ -18,6 +18,10 @@ MAJOR, MINOR = 1, 0
 GROUP_SIZE = 10
 HEADER = struct.Struct("<4sBBBBIIQII")
 FLAG_SCALED = 1
+MASK_VALUE_BITS = (1 << GROUP_SIZE) - 1
+UINT32_MAX = (1 << 32) - 1
+UINT64_MAX = (1 << 64) - 1
+FLOAT16_MAX = float(np.finfo(np.float16).max)
 
 
 @dataclass(frozen=True)
@@ -46,6 +50,40 @@ class PackedMatrix:
         return 32.0 * self.group_count / (self.rows * self.cols)
 
 
+def _validate_packed(packed: PackedMatrix) -> None:
+    """Reject objects that cannot have one canonical T10B1 v1 encoding."""
+    if not isinstance(packed.rows, (int, np.integer)) or not isinstance(packed.cols, (int, np.integer)):
+        raise ValueError("matrix dimensions must be integers")
+    if not 0 < int(packed.rows) <= UINT32_MAX or not 0 < int(packed.cols) <= UINT32_MAX:
+        raise ValueError("matrix dimensions must be non-zero uint32 values")
+    if packed.major != MAJOR or packed.minor != MINOR:
+        raise ValueError(f"unsupported T10B1 version: {packed.major}.{packed.minor}")
+
+    expected = int(packed.rows) * ((int(packed.cols) + GROUP_SIZE - 1) // GROUP_SIZE)
+    if expected > UINT64_MAX:
+        raise ValueError("group count exceeds the T10B1 uint64 field")
+    scales = np.asarray(packed.scales)
+    masks = np.asarray(packed.masks)
+    if scales.ndim != 1 or masks.ndim != 1 or len(scales) != expected or len(masks) != expected:
+        raise ValueError("scale/mask count does not match matrix dimensions")
+    if not np.issubdtype(scales.dtype, np.number) or np.issubdtype(scales.dtype, np.complexfloating):
+        raise ValueError("scales must be real numbers")
+    if not np.isfinite(scales).all() or np.any(scales <= 0) or np.any(scales > FLOAT16_MAX):
+        raise ValueError("scales must be finite positive float16 values")
+    if not np.issubdtype(masks.dtype, np.integer):
+        raise ValueError("masks must be integers")
+    if np.any(masks < 0) or np.any(masks.astype(np.uint64) & ~np.uint64(MASK_VALUE_BITS)):
+        raise ValueError("mask uses reserved bits outside the ten-weight group")
+
+    final_width = int(packed.cols) % GROUP_SIZE
+    if final_width:
+        groups_per_row = (int(packed.cols) + GROUP_SIZE - 1) // GROUP_SIZE
+        padding_mask = MASK_VALUE_BITS ^ ((1 << final_width) - 1)
+        final_masks = masks[groups_per_row - 1 :: groups_per_row].astype(np.uint64)
+        if np.any(final_masks & np.uint64(padding_mask)):
+            raise ValueError("final group has non-zero row-padding bits")
+
+
 def pack(weights: np.ndarray) -> PackedMatrix:
     """Quantize a finite rank-2 array to scaled binary groups."""
     matrix = np.asarray(weights, dtype=np.float32)
@@ -54,6 +92,8 @@ def pack(weights: np.ndarray) -> PackedMatrix:
     if not np.isfinite(matrix).all():
         raise ValueError("weights contain NaN or infinity")
     rows, cols = matrix.shape
+    if rows > UINT32_MAX or cols > UINT32_MAX:
+        raise ValueError("matrix dimensions exceed the T10B1 uint32 fields")
     groups = (cols + GROUP_SIZE - 1) // GROUP_SIZE
     scales = np.empty(rows * groups, dtype="<f2")
     masks = np.zeros(rows * groups, dtype="<u2")
@@ -61,7 +101,9 @@ def pack(weights: np.ndarray) -> PackedMatrix:
     for row in matrix:
         for start in range(0, cols, GROUP_SIZE):
             block = row[start : start + GROUP_SIZE]
-            scale = float(np.mean(np.abs(block)))
+            scale = float(np.mean(np.abs(block), dtype=np.float64))
+            if scale > FLOAT16_MAX:
+                raise ValueError("group scale exceeds the finite float16 range")
             scales[index] = max(scale, np.finfo(np.float16).tiny)
             mask = 0
             for bit, value in enumerate(block):
@@ -86,9 +128,8 @@ def unpack(packed: PackedMatrix) -> np.ndarray:
 
 
 def to_bytes(packed: PackedMatrix) -> bytes:
-    if len(packed.scales) != packed.group_count or len(packed.masks) != packed.group_count:
-        raise ValueError("scale/mask count does not match matrix dimensions")
-    payload = packed.scales.astype("<f2", copy=False).tobytes() + packed.masks.astype("<u2", copy=False).tobytes()
+    _validate_packed(packed)
+    payload = np.asarray(packed.scales).astype("<f2", copy=False).tobytes() + np.asarray(packed.masks).astype("<u2", copy=False).tobytes()
     payload_crc = zlib.crc32(payload)
     prefix = HEADER.pack(MAGIC, packed.major, packed.minor, 1, FLAG_SCALED, packed.rows, packed.cols, packed.group_count, payload_crc, 0)
     header_crc = zlib.crc32(prefix[:-4])
@@ -113,7 +154,9 @@ def from_bytes(data: bytes) -> PackedMatrix:
     split = count * 2
     scales = np.frombuffer(payload[:split], dtype="<f2").copy()
     masks = np.frombuffer(payload[split:], dtype="<u2").copy()
-    return PackedMatrix(rows, cols, scales, masks, major, minor)
+    packed = PackedMatrix(rows, cols, scales, masks, major, minor)
+    _validate_packed(packed)
+    return packed
 
 
 def write(path: str | Path, packed: PackedMatrix) -> None:
@@ -125,4 +168,3 @@ def write(path: str | Path, packed: PackedMatrix) -> None:
 
 def read(path: str | Path) -> PackedMatrix:
     return from_bytes(Path(path).read_bytes())
-

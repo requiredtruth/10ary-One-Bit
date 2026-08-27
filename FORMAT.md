@@ -44,7 +44,7 @@ Payload order:
 1. `group_count` IEEE-754 binary16 scales in row-major group order.
 2. `group_count` `uint16` masks in the same order.
 
-Within a mask, bit 0 represents the first weight and bit 9 the tenth. Bits 10–15 must be zero. Groups never cross row boundaries. `group_count = rows × ceil(columns / 10)`.
+Within a mask, bit 0 represents the first weight and bit 9 the tenth. Bits 10–15 must be zero. Unused bits in a row's final partial group must also be zero, giving each logical matrix one canonical encoding. Groups never cross row boundaries. `group_count = rows × ceil(columns / 10)`.
 
 ## Arithmetic and training
 
@@ -55,5 +55,4 @@ Within a mask, bit 0 represents the first weight and bit 9 the tenth. Bits 10–
 
 ## Validation requirements
 
-Readers must reject bad magic, unknown major versions, unknown flags, impossible dimensions/group counts, incorrect lengths, and failed header or payload checksums. Load files only from sources you trust; checksums detect corruption, not malicious intent.
-
+Readers must reject bad magic, unsupported versions or flags, impossible dimensions/group counts, incorrect lengths, non-finite or non-positive scales, non-zero reserved/padding bits, and failed header or payload checksums. Writers must reject a group whose scale is not representable as finite binary16 instead of silently producing infinity. Load files only from sources you trust; checksums detect corruption, not malicious intent.
